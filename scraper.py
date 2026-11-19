@@ -154,11 +154,15 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
-        page = await context.new_page()
-
         all_jobs = []
-        all_jobs.extend(await scrape_qiuzhifangzhou(page))
-        all_jobs.extend(await scrape_givemeoc(page))
+
+        qiuzhi_page = await context.new_page()
+        all_jobs.extend(await scrape_qiuzhifangzhou(qiuzhi_page))
+        await qiuzhi_page.close()
+
+        givemeoc_page = await context.new_page()
+        all_jobs.extend(await scrape_givemeoc(givemeoc_page))
+        await givemeoc_page.close()
 
         print(f"\n抓取完成！总计 {len(all_jobs)} 条记录。")
         
