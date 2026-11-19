@@ -64,25 +64,28 @@ async def scrape_qiuzhifangzhou(page):
 
                     if company and position:
                         job = {
-                            "更新日期": get_now_timestamp(),
                             "公司名称": company,
-                            "招聘岗位": position,
-                            "网申链接": {"link": link, "text": "点击投递"} if link else ""
+                            "岗位": position,
                         }
+                        if link:
+                            job["投递链接"] = {
+                                "link": link,
+                                "text": "点击投递",
+                            }
                         deadline_ts = parse_date_to_timestamp(deadline_str)
-                        if deadline_ts:
-                            job["截止时间"] = deadline_ts
+                        if deadline_ts is not None:
+                            job["结束时间"] = deadline_ts
                         jobs.append(job)
 
             # 智能翻页
-            can_next = await page.evaluate(\"\"\"() => {
-                const btn = document.querySelector('[ref=\"btNext\"]');
+            can_next = await page.evaluate(""""""() => {
+                const btn = document.querySelector('[ref=""btNext""]');
                 if (btn && !btn.disabled && !btn.classList.contains('ag-disabled')) {
                     btn.click();
                     return true;
                 }
                 return false;
-            }\"\"\")
+            }"""""")
             if not can_next:
                 break
             await asyncio.sleep(2)
@@ -93,7 +96,7 @@ async def scrape_qiuzhifangzhou(page):
 
 
 async def scrape_givemeoc(page):
-    \"\"\"GiveMeOC：解决只抓 30 条和翻页失效的问题\"\"\"
+    """"""GiveMeOC：解决只抓 30 条和翻页失效的问题""""""
     jobs = []
     print("正在连接: GiveMeOC...")
     try:
@@ -115,14 +118,17 @@ async def scrape_givemeoc(page):
 
                     if company and position:
                         job = {
-                            "更新日期": get_now_timestamp(),
                             "公司名称": company,
-                            "招聘岗位": position,
-                            "网申链接": {"link": link, "text": "点击投递"} if link else ""
+                            "岗位": position,
                         }
+                        if link:
+                            job["投递链接"] = {
+                                "link": link,
+                                "text": "点击投递",
+                            }
                         deadline_ts = parse_date_to_timestamp(deadline_str)
-                        if deadline_ts:
-                            job["截止时间"] = deadline_ts
+                        if deadline_ts is not None:
+                            job["结束时间"] = deadline_ts
                         jobs.append(job)
             await asyncio.sleep(1)
     except Exception as e:
@@ -154,17 +160,17 @@ async def main():
         all_jobs.extend(await scrape_qiuzhifangzhou(page))
         all_jobs.extend(await scrape_givemeoc(page))
 
-        print(f\"\n抓取完成！总计 {len(all_jobs)} 条记录。\")
+        print(f"""n抓取完成！总计 {len(all_jobs)} 条记录。"")
 
         if all_jobs:
             feishu = FeishuTable(FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BASE_TOKEN)
             written = feishu.batch_add_records(FEISHU_TABLE_ID, all_jobs)
-            print(f\"数据已成功同步至飞书，写入 {written} 条。\")
+            print(f""数据已成功同步至飞书，写入 {written} 条。"")
         else:
-            print(\"本次抓取结果为空，跳过飞书写入。\")
+            print(""本次抓取结果为空，跳过飞书写入。"")
 
         await browser.close()
 
 
-if __name__ == \"__main__\":
+if __name__ == ""__main__"":
     asyncio.run(main())
