@@ -1,6 +1,6 @@
 import os
 import asyncio
-import json
+import re
 import time
 from playwright.async_api import async_playwright
 from datetime import datetime
@@ -129,6 +129,27 @@ async def scrape_givemeoc(page):
                 recruitment_type = (await cells[columns["招聘类型"]].inner_text()).strip()
                 if recruitment_type and recruitment_type != "-":
                     job["招聘类型"] = recruitment_type
+                location = (await cells[5].inner_text()).strip()
+                locations = [
+                    part.strip() for part in re.split(r"[、，,；;\n]+", location)
+                    if part.strip() and part.strip() != "-"
+                ]
+                if locations:
+                    job["工作地点"] = list(dict.fromkeys(locations))
+
+                audience = await cells[4].inner_text()
+                cohorts = re.findall(r"20\d{2}", audience)
+                if cohorts:
+                    job["届次"] = [f"{year}届" for year in dict.fromkeys(cohorts)]
+
+                if len(cells) > 14:
+                    note = (await cells[14].inner_text()).strip()
+                    if note and note != "-":
+                        job["备注"] = note
+                        degree = re.fullmatch(r"(大专|专科|本科|硕士|博士)(?:及以上|以上)?", note)
+                        if degree:
+                            job["学历要求"] = note
+
                 deadline = parse_date_to_timestamp(
                     await cells[columns["投递截止"]].inner_text()
                 )
