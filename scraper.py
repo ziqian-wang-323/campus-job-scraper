@@ -142,13 +142,19 @@ async def scrape_givemeoc(page):
                 if cohorts:
                     job["届次"] = [f"{year}届" for year in dict.fromkeys(cohorts)]
 
+                note = ""
                 if len(cells) > 14:
                     note = (await cells[14].inner_text()).strip()
                     if note and note != "-":
                         job["备注"] = note
-                        degree = re.fullmatch(r"(大专|专科|本科|硕士|博士)(?:及以上|以上)?", note)
-                        if degree:
-                            job["学历要求"] = note
+
+                degree_pattern = r"(?:最低学历[：:]?\s*|学历要求[：:]?\s*)?(大专|专科|本科|硕士|博士)(\s*(?:及以上|以上|起))?"
+                degree = re.fullmatch(degree_pattern, note)
+                if degree is None:
+                    degree = re.search(r"(大专|专科|本科|硕士|博士)(\s*(?:及以上|以上|起))\s*$", audience.strip())
+                if degree:
+                    minimum = "大专" if degree[1] == "专科" else degree[1]
+                    job["学历要求"] = minimum + ("及以上" if degree[2] else "")
 
                 deadline = parse_date_to_timestamp(
                     await cells[columns["投递截止"]].inner_text()
