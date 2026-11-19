@@ -105,31 +105,37 @@ async def scrape_givemeoc(page):
             await page.goto(f"https://www.givemeoc.com/?paged={p}", wait_until="domcontentloaded")
             await page.wait_for_selector("table", timeout=10000)
 
-            rows = await page.query_selector_all("tr")
-            for row in rows[1:]:  # 跳过表头
-                cells = await row.query_selector_all("td")
-                if len(cells) >= 10:
-                    company  = (await cells[1].inner_text()).strip()
-                    position = (await cells[6].inner_text()).strip()
-                    deadline_str = (await cells[9].inner_text()).strip()
-                    
-                    link_elem = await cells[6].query_selector("a")
-                    link = await link_elem.get_attribute("href") if link_elem else ""
+            table = page.locator("table").filter(has=page.get_by_role("columnheader", name="公司名称", exact=True)).first
+            headers = await table.locator("tr").first.locator("th").all_inner_texts()
+            expected = {0: "公司名称", 2: "所属行业", 3: "招聘类型", 6: "岗位", 9: "投递截止"}
+            if len(headers) < 10 or any(
+                not headers[index].strip().startswith(name)
+                for index, name in expected.items()
+            ):
+                raise ValueError("GiveMeOC 表头与预期不符，停止读取该页")
 
-                    if company and position:
-                        job = {
-                            "公司名称": company,
-                            "岗位": position,
-                        }
-                        if link:
-                            job["投递链接"] = {
-                                "link": link,
-                                "text": "点击投递",
-                            }
-                        deadline_ts = parse_date_to_timestamp(deadline_str)
-                        if deadline_ts is not None:
-                            job["结束时间"] = deadline_ts
-                        jobs.append(job)
+            rows = await table.query_selector_all("tr")
+            for row in rows[1:]:
+                cells = await row.query_selector_all("td")
+                if len(cells) < 10:
+                    continue
+                company = (await cells[0].inner_text()).strip()
+                position = (await cells[6].inner_text()).strip()
+                if not company or not position:
+                    continue
+
+                job = {"公司名称": company, "岗位": position}
+                industry = (await cells[2].inner_text()).strip()
+                if industry and industry != "-":
+                    job["公司行业"] = [industry]
+                recruitment_type = (await cells[3].inner_text()).strip()
+                if recruitment_type and recruitment_type != "-":
+                    job["招聘类型"] = recruitment_type
+
+                deadline = parse_date_to_timestamp(await cells[9].inner_text())
+                if deadline is not None:
+                    job["结束时间"] = deadline
+                jobs.append(job)
             await asyncio.sleep(1)
     except Exception as e:
         print(f"GiveMeOC 出错: {e}")
