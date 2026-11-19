@@ -92,7 +92,13 @@ class FeishuTable:
             batch = records[i:i + 500]
             payload = {"records": [{"fields": r} for r in batch]}
             resp = requests.post(url, headers=self._headers(), json=payload)
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"飞书写入失败，HTTP {resp.status_code}，"
+                    f"响应内容：{resp.text[:300]}"
+                ) from exc
             if resp.status_code == 200 and data.get("code") == 0:
                 written = len(data.get("data", {}).get("records", []))
                 total_written += written
