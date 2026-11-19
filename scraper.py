@@ -78,14 +78,14 @@ async def scrape_qiuzhifangzhou(page):
                         jobs.append(job)
 
             # 智能翻页
-            can_next = await page.evaluate(""""""() => {
-                const btn = document.querySelector('[ref=""btNext""]');
+            can_next = await page.evaluate("""() => {
+                const btn = document.querySelector('[ref="btNext"]');
                 if (btn && !btn.disabled && !btn.classList.contains('ag-disabled')) {
                     btn.click();
                     return true;
                 }
                 return false;
-            }"""""")
+            }""")
             if not can_next:
                 break
             await asyncio.sleep(2)
@@ -96,7 +96,7 @@ async def scrape_qiuzhifangzhou(page):
 
 
 async def scrape_givemeoc(page):
-    """"""GiveMeOC：解决只抓 30 条和翻页失效的问题""""""
+    """GiveMeOC：解决只抓 30 条和翻页失效的问题"""
     jobs = []
     print("正在连接: GiveMeOC...")
     try:
@@ -160,17 +160,17 @@ async def main():
         all_jobs.extend(await scrape_qiuzhifangzhou(page))
         all_jobs.extend(await scrape_givemeoc(page))
 
-        print(f"""n抓取完成！总计 {len(all_jobs)} 条记录。"")
-
+        print(f"\n抓取完成！总计 {len(all_jobs)} 条记录。")
+        
         if all_jobs:
             feishu = FeishuTable(FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BASE_TOKEN)
             written = feishu.batch_add_records(FEISHU_TABLE_ID, all_jobs)
-            print(f""数据已成功同步至飞书，写入 {written} 条。"")
+            print(f"数据已成功同步至飞书，写入 {written} 条。")
         else:
-            print(""本次抓取结果为空，跳过飞书写入。"")
+            print("本次抓取结果为空，跳过飞书写入。")
 
         await browser.close()
 
 
-if __name__ == ""__main__"":
+if __name__ == "__main__":
     asyncio.run(main())
