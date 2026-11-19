@@ -105,51 +105,38 @@ async def scrape_givemeoc(page):
             await page.goto(f"https://www.givemeoc.com/?paged={p}", wait_until="domcontentloaded")
             await page.wait_for_selector("table", timeout=10000)
 
-            table = page.locator("table").filter(
-                has=page.get_by_role("columnheader", name="公司名称", exact=True)
-            ).first
-            header_row = table.locator("tr").filter(
-                has=page.get_by_role("columnheader", name="公司名称", exact=True)
-            ).first
-            headers = await header_row.locator("th, td").all_text_contents()
-            labels = ("公司名称", "所属行业", "招聘类型", "岗位", "投递截止")
-            columns = {}
-            for label in labels:
-                matches = [
-                    index for index, header in enumerate(headers)
-                    if "".join(header.split()).startswith(label)
-                ]
-                if len(matches) == 1:
-                    columns[label] = matches[0]
-            if "公司名称" not in columns or "岗位" not in columns:
-                raise ValueError(f"GiveMeOC 未找到唯一的公司名称和岗位列，实际表头：{headers!r}")
-
-            rows = await table.query_selector_all("tr")
+            # 登录前的列表也有数据行，表头可能由独立的组件渲染。
+            columns = {"公司名称": 0, "所属行业": 2, "招聘类型": 3, "岗位": 6, "投递截止": 9}
+            company_types = {"央国企", "民企", "事业单位", "银行", "外企/合资", "社会机构"}
+            rows = await page.query_selector_all("table tr")
+            page_jobs_before = len(jobs)
             for row in rows:
                 cells = await row.query_selector_all("td")
-                if len(cells) != len(headers) or await row.query_selector("th"):
+                if len(cells) < 10:
+                    continue
+                company_type = (await cells[1].inner_text()).strip()
+                if company_type not in company_types:
                     continue
                 company = (await cells[columns["公司名称"]].inner_text()).strip()
                 position = (await cells[columns["岗位"]].inner_text()).strip()
-                if not company or not position:
+                if not company or company in company_types or not position:
                     continue
 
                 job = {"公司名称": company, "岗位": position}
-                if "所属行业" in columns:
-                    industry = (await cells[columns["所属行业"]].inner_text()).strip()
-                    if industry and industry != "-":
-                        job["公司行业"] = [industry]
-                if "招聘类型" in columns:
-                    recruitment_type = (await cells[columns["招聘类型"]].inner_text()).strip()
-                    if recruitment_type and recruitment_type != "-":
-                        job["招聘类型"] = recruitment_type
-                if "投递截止" in columns:
-                    deadline = parse_date_to_timestamp(
-                        await cells[columns["投递截止"]].inner_text()
-                    )
-                    if deadline is not None:
-                        job["结束时间"] = deadline
+                industry = (await cells[columns["所属行业"]].inner_text()).strip()
+                if industry and industry != "-":
+                    job["公司行业"] = [industry]
+                recruitment_type = (await cells[columns["招聘类型"]].inner_text()).strip()
+                if recruitment_type and recruitment_type != "-":
+                    job["招聘类型"] = recruitment_type
+                deadline = parse_date_to_timestamp(
+                    await cells[columns["投递截止"]].inner_text()
+                )
+                if deadline is not None:
+                    job["结束时间"] = deadline
                 jobs.append(job)
+            if len(jobs) == page_jobs_before:
+                print(f"GiveMeOC 第 {p} 页没有符合列结构的数据行")
             await asyncio.sleep(1)
     except Exception as e:
         print(f"GiveMeOC 出错: {e}")
@@ -191,7 +178,7 @@ async def main():
             written = feishu.batch_add_records(FEISHU_TABLE_ID, all_jobs)
             print(f"数据已成功同步至飞书，写入 {written} 条。")
         else:
-            print("本次抓取结果为空，跳过飞书写入。")
+            raise RuntimeError("两个来源均未抓到记录，未写入飞书。")
 
         await browser.close()
 
