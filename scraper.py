@@ -4,6 +4,7 @@ import re
 import time
 
 import requests
+from urllib.parse import urljoin, urlsplit
 from playwright.async_api import async_playwright
 from datetime import datetime
 from feishu_utils import FeishuTable
@@ -40,6 +41,30 @@ def parse_date_to_timestamp(date_str):
         pass
     return None
 
+async def read_public_link(container, page_url, labels=()):
+    for anchor in await container.query_selector_all("a"):
+        text = (await anchor.inner_text()).strip()
+        if labels and text not in labels:
+            continue
+        if any(word in text for word in ("登录", "会员", "注册")):
+            continue
+        for attribute in ("href", "title", "data-url"):
+            value = (await anchor.get_attribute(attribute) or "").strip()
+            if not value.startswith(("https://", "http://", "//", "/")):
+                continue
+            link = urljoin(page_url, value)
+            target = urlsplit(link)
+            if target.scheme not in ("http", "https") or not target.hostname:
+                continue
+            if target.hostname == urlsplit(page_url).hostname and (
+                target.path == urlsplit(page_url).path
+                or target.path.rstrip("/") in ("", "/login", "/register", "/wp-login.php")
+            ):
+                continue
+            return link
+    return None
+
+
 async def scrape_qiuzhifangzhou(page):
     """求职方舟：解决翻页超时和抓取为空的问题"""
     jobs = []
@@ -59,21 +84,15 @@ async def scrape_qiuzhifangzhou(page):
                     position = (await cells[2].inner_text()).strip()
                     deadline_str = (await cells[7].inner_text()).strip()
                     
-                    link_elem = await cells[2].query_selector("a")
-                    link = await link_elem.get_attribute("href") if link_elem else ""
-                    if link and not link.startswith("http"):
-                        link = "https://www.qiuzhifangzhou.com" + link
-
                     if company and position:
                         job = {
                             "公司名称": company,
                             "岗位": position,
                         }
-                        if link:
-                            job["投递链接"] = {
-                                "link": link,
-                                "text": "点击投递",
-                            }
+                        for field, label in (("公告链接", "招聘公告"), ("投递链接", "投递官网")):
+                            link = await read_public_link(row, page.url, (label,))
+                            if link:
+                                job[field] = {"link": link, "text": label}
                         deadline_ts = parse_date_to_timestamp(deadline_str)
                         if deadline_ts is not None:
                             job["结束时间"] = deadline_ts
@@ -125,6 +144,11 @@ async def scrape_givemeoc(page):
                     continue
 
                 job = {"公司名称": company, "岗位": position}
+                for index, field in ((10, "投递链接"), (11, "公告链接")):
+                    if len(cells) > index:
+                        link = await read_public_link(cells[index], page.url)
+                        if link:
+                            job[field] = {"link": link, "text": field}
                 industry = (await cells[columns["所属行业"]].inner_text()).strip()
                 if industry and industry != "-":
                     job["公司行业"] = [industry]
@@ -177,19 +201,6 @@ async def scrape_givemeoc(page):
     return jobs
 
 
-# These links are for the entire 2027 fall recruiting campaign.
-CAMPUS_LINKS = {
-    "极兔速递": (
-        "https://career.gdufs.edu.cn/index.php/web/index/preach-detail?id=1701",
-        "https://jtexpress.jobs.feishu.cn/478610/",
-    ),
-    "GE医疗": (
-        "https://career.hebut.edu.cn/home/correcruit/content/id/80189.html",
-        "https://app.mokahr.com/campus-recruitment/gehc/142250#/",
-    ),
-}
-
-
 def sync_jobs(feishu, table_id, jobs):
     url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{feishu.base_token}/tables/{table_id}/records"
     records = {}
@@ -214,10 +225,6 @@ def sync_jobs(feishu, table_id, jobs):
     updates = {}
     for job in jobs:
         key = (job["公司名称"], job["岗位"])
-        links = CAMPUS_LINKS.get(key[0])
-        if links and job.get("招聘类型") == "秋招" and "2027届" in job.get("届次", []):
-            job.setdefault("公告链接", {"link": links[0], "text": "招聘公告"})
-            job.setdefault("投递链接", {"link": links[1], "text": "校招入口"})
         if key not in records:
             additions.setdefault(key, job)
             continue
