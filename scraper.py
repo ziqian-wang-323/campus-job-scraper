@@ -65,57 +65,6 @@ async def read_public_link(container, page_url, labels=()):
     return None
 
 
-async def scrape_qiuzhifangzhou(page):
-    """求职方舟：解决翻页超时和抓取为空的问题"""
-    jobs = []
-    print("正在连接: 求职方舟...")
-    try:
-        await page.goto("https://www.qiuzhifangzhou.com/campus", wait_until="networkidle", timeout=60000)
-
-        for i in range(1, 31):  # 限制抓取 30 页
-            print(f"  正在处理求职方舟第 {i} 页...")
-            await page.wait_for_selector(".ag-row", timeout=10000)
-
-            rows = await page.query_selector_all(".ag-row")
-            for row in rows:
-                cells = await row.query_selector_all(".ag-cell")
-                if len(cells) >= 8:
-                    company  = (await cells[1].inner_text()).strip()
-                    position = (await cells[2].inner_text()).strip()
-                    deadline_str = (await cells[7].inner_text()).strip()
-                    
-                    if company and position:
-                        job = {
-                            "公司名称": company,
-                            "岗位": position,
-                        }
-                        for field, label in (("公告链接", "招聘公告"), ("投递链接", "投递官网")):
-                            link = await read_public_link(row, page.url, (label,))
-                            if link:
-                                job[field] = {"link": link, "text": label}
-                        deadline_ts = parse_date_to_timestamp(deadline_str)
-                        if deadline_ts is not None:
-                            job["结束时间"] = deadline_ts
-                        jobs.append(job)
-
-            # 智能翻页
-            can_next = await page.evaluate("""() => {
-                const btn = document.querySelector('[ref="btNext"]');
-                if (btn && !btn.disabled && !btn.classList.contains('ag-disabled')) {
-                    btn.click();
-                    return true;
-                }
-                return false;
-            }""")
-            if not can_next:
-                break
-            await asyncio.sleep(2)
-    except Exception as e:
-        print(f"求职方舟出错: {e}")
-    print(f"求职方舟抓取完成，共 {len(jobs)} 条")
-    return jobs
-
-
 async def scrape_givemeoc(page):
     """GiveMeOC：解决只抓 30 条和翻页失效的问题"""
     jobs = []
@@ -278,15 +227,9 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
-        all_jobs = []
-
-        qiuzhi_page = await context.new_page()
-        all_jobs.extend(await scrape_qiuzhifangzhou(qiuzhi_page))
-        await qiuzhi_page.close()
-
-        givemeoc_page = await context.new_page()
-        all_jobs.extend(await scrape_givemeoc(givemeoc_page))
-        await givemeoc_page.close()
+        page = await context.new_page()
+        all_jobs = await scrape_givemeoc(page)
+        await page.close()
 
         print(f"\n抓取完成！总计 {len(all_jobs)} 条记录。")
         
@@ -294,7 +237,7 @@ async def main():
             feishu = FeishuTable(FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BASE_TOKEN)
             sync_jobs(feishu, FEISHU_TABLE_ID, all_jobs)
         else:
-            raise RuntimeError("两个来源均未抓到记录，未写入飞书。")
+            raise RuntimeError("GiveMeOC 未抓到记录，未写入飞书。")
 
         await browser.close()
 
