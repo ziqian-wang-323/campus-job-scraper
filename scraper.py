@@ -156,6 +156,10 @@ async def scrape_givemeoc(page):
                     minimum = "大专" if degree[1] == "专科" else degree[1]
                     job["学历要求"] = minimum + ("及以上" if degree[2] else "")
 
+                updated_at = parse_date_to_timestamp(await cells[8].inner_text())
+                if updated_at is not None:
+                    job["更新时间"] = updated_at
+
                 deadline = parse_date_to_timestamp(
                     await cells[columns["投递截止"]].inner_text()
                 )
