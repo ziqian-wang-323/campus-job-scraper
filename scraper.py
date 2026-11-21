@@ -2,6 +2,8 @@ import os
 import asyncio
 import re
 import time
+
+import requests
 from playwright.async_api import async_playwright
 from datetime import datetime
 from feishu_utils import FeishuTable
@@ -175,6 +177,83 @@ async def scrape_givemeoc(page):
     return jobs
 
 
+# These links are for the entire 2027 fall recruiting campaign.
+CAMPUS_LINKS = {
+    "极兔速递": (
+        "https://career.gdufs.edu.cn/index.php/web/index/preach-detail?id=1701",
+        "https://jtexpress.jobs.feishu.cn/478610/",
+    ),
+    "GE医疗": (
+        "https://career.hebut.edu.cn/home/correcruit/content/id/80189.html",
+        "https://app.mokahr.com/campus-recruitment/gehc/142250#/",
+    ),
+}
+
+
+def sync_jobs(feishu, table_id, jobs):
+    url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{feishu.base_token}/tables/{table_id}/records"
+    records = {}
+    params = {"page_size": 500}
+    while True:
+        response = requests.get(url, headers=feishu._headers(), params=params, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        if result.get("code") != 0:
+            raise RuntimeError(f"读取飞书记录失败：{result}")
+        data = result["data"]
+        for record in data["items"]:
+            fields = record["fields"]
+            key = (fields.get("公司名称"), fields.get("岗位"))
+            if all(isinstance(value, str) and value for value in key):
+                records.setdefault(key, []).append(record)
+        if not data.get("has_more"):
+            break
+        params["page_token"] = data["page_token"]
+
+    additions = {}
+    updates = {}
+    for job in jobs:
+        key = (job["公司名称"], job["岗位"])
+        links = CAMPUS_LINKS.get(key[0])
+        if links and job.get("招聘类型") == "秋招" and "2027届" in job.get("届次", []):
+            job.setdefault("公告链接", {"link": links[0], "text": "招聘公告"})
+            job.setdefault("投递链接", {"link": links[1], "text": "校招入口"})
+        if key not in records:
+            additions.setdefault(key, job)
+            continue
+        for record in records[key]:
+            fields = record["fields"]
+            if fields.get("招聘类型") and fields["招聘类型"] != job.get("招聘类型"):
+                continue
+            if fields.get("届次") and not set(fields["届次"]).intersection(job.get("届次", [])):
+                continue
+            patch = {}
+            if job.get("更新时间"):
+                patch["更新时间"] = job["更新时间"]
+            for name in ("公告链接", "投递链接"):
+                if name in job and not fields.get(name):
+                    patch[name] = job[name]
+            if patch:
+                updates.setdefault(record["record_id"], {}).update(patch)
+
+    pending = [{"record_id": record_id, "fields": fields} for record_id, fields in updates.items()]
+    for start in range(0, len(pending), 500):
+        batch = pending[start:start + 500]
+        response = requests.post(f"{url}/batch_update", headers=feishu._headers(),
+                                 json={"records": batch}, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        if result.get("code") != 0:
+            raise RuntimeError(f"更新飞书记录失败：{result}")
+        if len(result["data"]["records"]) != len(batch):
+            raise RuntimeError("飞书返回的更新条数与请求不一致")
+
+    written = feishu.batch_add_records(table_id, list(additions.values()))
+    if written != len(additions):
+        raise RuntimeError(f"飞书新增不完整：{written}/{len(additions)}")
+    print(f"飞书同步完成：新增 {written} 条，更新 {len(updates)} 条")
+
+
 async def main():
     # 检查必要的环境变量
     missing = [k for k, v in {
@@ -206,8 +285,7 @@ async def main():
         
         if all_jobs:
             feishu = FeishuTable(FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BASE_TOKEN)
-            written = feishu.batch_add_records(FEISHU_TABLE_ID, all_jobs)
-            print(f"数据已成功同步至飞书，写入 {written} 条。")
+            sync_jobs(feishu, FEISHU_TABLE_ID, all_jobs)
         else:
             raise RuntimeError("两个来源均未抓到记录，未写入飞书。")
 
