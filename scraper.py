@@ -70,7 +70,7 @@ async def scrape_givemeoc(page):
     jobs = []
     print("正在连接: GiveMeOC...")
     try:
-        for p in range(1, 11):  # 抓取前 10 页
+        for p in range(1, 21):  # 前 10 页正常同步，第 11–20 页补录历史岗位
             print(f"  正在处理 GiveMeOC 第 {p} 页...")
             await page.goto(f"https://www.givemeoc.com/?paged={p}", wait_until="domcontentloaded")
             await page.wait_for_selector("table", timeout=10000)
@@ -140,6 +140,8 @@ async def scrape_givemeoc(page):
                 )
                 if deadline is not None:
                     job["结束时间"] = deadline
+                if p > 10:
+                    job["历史补录"] = True
                 jobs.append(job)
             if len(jobs) == page_jobs_before:
                 print(f"GiveMeOC 第 {p} 页没有符合列结构的数据行")
@@ -223,7 +225,8 @@ def sync_jobs(feishu, table_id, jobs):
     written = feishu.batch_add_records(table_id, list(additions.values()))
     if written != len(additions):
         raise RuntimeError(f"飞书新增不完整：{written}/{len(additions)}")
-    print(f"飞书同步完成：新增 {written} 条，更新 {len(updates)} 条")
+    historical = sum(job.get("历史补录", False) for job in additions.values())
+    print(f"飞书同步完成：新增 {written} 条（历史补录 {historical} 条），更新 {len(updates)} 条")
 
 
 async def main():
