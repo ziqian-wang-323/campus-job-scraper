@@ -6,7 +6,8 @@ import time
 import requests
 from urllib.parse import urljoin, urlsplit
 from playwright.async_api import async_playwright
-from datetime import datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from feishu_utils import FeishuTable
 
 # 飞书配置：从环境变量读取（与 GitHub Secrets 名称完全对应）
@@ -65,12 +66,16 @@ async def read_public_link(container, page_url, labels=()):
     return None
 
 
+HISTORY_CUTOFF = date(2026, 11, 10)
+BEIJING_TIME = ZoneInfo("Asia/Shanghai")
+
+
 async def scrape_givemeoc(page):
     """GiveMeOC：解决只抓 30 条和翻页失效的问题"""
     jobs = []
     print("正在连接: GiveMeOC...")
     try:
-        for p in range(1, 21):  # 前 10 页正常同步，第 11–20 页补录历史岗位
+        for p in range(1, 41):  # 第 21–40 页仅补录早于分界日期的岗位
             print(f"  正在处理 GiveMeOC 第 {p} 页...")
             await page.goto(f"https://www.givemeoc.com/?paged={p}", wait_until="domcontentloaded")
             await page.wait_for_selector("table", timeout=10000)
@@ -132,6 +137,11 @@ async def scrape_givemeoc(page):
                     job["学历要求"] = minimum + ("及以上" if degree[2] else "")
 
                 updated_at = parse_date_to_timestamp(await cells[8].inner_text())
+                if p > 20 and (
+                    updated_at is None
+                    or datetime.fromtimestamp(updated_at / 1000, BEIJING_TIME).date() >= HISTORY_CUTOFF
+                ):
+                    continue
                 if updated_at is not None:
                     job["更新时间"] = updated_at
 
@@ -197,6 +207,8 @@ def sync_jobs(feishu, table_id, jobs):
         key = (job["公司名称"], job["岗位"])
         if key not in records:
             additions.setdefault(key, job)
+            continue
+        if job.get("历史补录"):
             continue
         for record in records[key]:
             fields = record["fields"]
