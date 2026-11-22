@@ -150,20 +150,39 @@ async def scrape_givemeoc(page):
     return jobs
 
 
+def feishu_response_data(response, operation):
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"{operation}失败，HTTP {response.status_code}，响应不是 JSON") from exc
+    if not response.ok or result.get("code") != 0:
+        error = result.get("error") or {}
+        raise RuntimeError(
+            f"{operation}失败，HTTP {response.status_code}，"
+            f"飞书错误码 {result.get('code')}，{result.get('msg')}，"
+            f"日志 ID {error.get('log_id')}"
+        )
+    return result["data"]
+
+
+def feishu_text(value):
+    if isinstance(value, list):
+        return "".join(segment.get("text", "") for segment in value if isinstance(segment, dict))
+    return value
+
+
 def sync_jobs(feishu, table_id, jobs):
     url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{feishu.base_token}/tables/{table_id}/records"
     records = {}
     params = {"page_size": 500}
     while True:
-        response = requests.get(url, headers=feishu._headers(), params=params, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        if result.get("code") != 0:
-            raise RuntimeError(f"读取飞书记录失败：{result}")
-        data = result["data"]
-        for record in data["items"]:
+        response = requests.post(
+            f"{url}/search", headers=feishu._headers(), params=params, json={}, timeout=30
+        )
+        data = feishu_response_data(response, "查询飞书记录")
+        for record in data.get("items") or []:
             fields = record["fields"]
-            key = (fields.get("公司名称"), fields.get("岗位"))
+            key = (feishu_text(fields.get("公司名称")), feishu_text(fields.get("岗位")))
             if all(isinstance(value, str) and value for value in key):
                 records.setdefault(key, []).append(record)
         if not data.get("has_more"):
@@ -184,7 +203,7 @@ def sync_jobs(feishu, table_id, jobs):
             if fields.get("届次") and not set(fields["届次"]).intersection(job.get("届次", [])):
                 continue
             patch = {}
-            if job.get("更新时间"):
+            if "更新时间" in job and job["更新时间"] != fields.get("更新时间"):
                 patch["更新时间"] = job["更新时间"]
             for name in ("公告链接", "投递链接"):
                 if name in job and not fields.get(name):
@@ -197,11 +216,8 @@ def sync_jobs(feishu, table_id, jobs):
         batch = pending[start:start + 500]
         response = requests.post(f"{url}/batch_update", headers=feishu._headers(),
                                  json={"records": batch}, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        if result.get("code") != 0:
-            raise RuntimeError(f"更新飞书记录失败：{result}")
-        if len(result["data"]["records"]) != len(batch):
+        data = feishu_response_data(response, "更新飞书记录")
+        if len(data["records"]) != len(batch):
             raise RuntimeError("飞书返回的更新条数与请求不一致")
 
     written = feishu.batch_add_records(table_id, list(additions.values()))
