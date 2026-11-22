@@ -131,6 +131,10 @@ async def scrape_givemeoc(page):
                     minimum = "大专" if degree[1] == "专科" else degree[1]
                     job["学历要求"] = minimum + ("及以上" if degree[2] else "")
 
+                updated_at = parse_date_to_timestamp(await cells[8].inner_text())
+                if updated_at is not None:
+                    job["更新时间"] = updated_at
+
                 deadline = parse_date_to_timestamp(
                     await cells[columns["投递截止"]].inner_text()
                 )
@@ -201,6 +205,8 @@ def sync_jobs(feishu, table_id, jobs):
             if fields.get("届次") and not set(fields["届次"]).intersection(job.get("届次", [])):
                 continue
             patch = {}
+            if "更新时间" in job and job["更新时间"] != fields.get("更新时间"):
+                patch["更新时间"] = job["更新时间"]
             for name in ("公告链接", "投递链接"):
                 if name in job and not fields.get(name):
                     patch[name] = job[name]
