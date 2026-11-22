@@ -2,8 +2,8 @@ name: Daily Job Scraper (Feishu Only)
 
 on:
   schedule:
-    # 每天北京时间上午 10 点 (UTC 2:00) 运行
-    - cron: '0 2 * * *'
+    # 每天北京时间凌晨 0 点（UTC 前一天 16:00） 运行
+    - cron: '0 16 * * *'
   workflow_dispatch:
 
 jobs:
